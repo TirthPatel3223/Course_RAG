@@ -1,0 +1,35 @@
+# Environment
+.env
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Credentials (secrets)
+credentials/*.json
+credentials/*.pickle
+
+# Data (persistent volumes)
+data/chroma_db/
+data/sessions.db
+data/checkpoints.db
+data/checkpoints.db-shm
+data/checkpoints.db-wal
+data/temp_uploads/
+
+# IDE
+.vscode/
+.idea/
+.gemini/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
+
+# Test / Temp
+tmp/
+.pytest_cache/
+*.pdf

@@ -1,0 +1,321 @@
+"""
+Chat Routes — WebSocket-based chat with the LangGraph agent.
+Handles real-time messaging, streaming responses, and upload approval.
+"""
+
+import json
+import logging
+import uuid
+from typing import Optional
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
+from langchain_core.messages import HumanMessage
+
+from backend.api.auth import verify_ws_token
+from backend.agent.graph import create_agent
+from backend.services.session_service import get_session_service
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+# Store active WebSocket connections
+active_connections: dict[str, WebSocket] = {}
+
+
+async def _get_or_create_graph():
+    """Lazy-init the agent graph (singleton)."""
+    if not hasattr(_get_or_create_graph, "_graph"):
+        _get_or_create_graph._graph = await create_agent()
+    return _get_or_create_graph._graph
+
+
+@router.websocket("/ws/chat")
+async def websocket_chat(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time chat.
+
+    Protocol:
+    1. Client connects with ?token=<auth_token>
+    2. Client sends JSON: {"type": "chat", "message": "...", "session_id": "..."}
+    3. Server sends JSON: {"type": "response", "data": {...}}
+    4. For uploads: {"type": "upload_approval", "data": {"decision": "approved"}}
+    """
+    # Verify authentication
+    if not await verify_ws_token(websocket):
+        await websocket.close(code=4001, reason="Authentication required")
+        return
+
+    await websocket.accept()
+    connection_id = str(uuid.uuid4())[:8]
+    logger.info(f"WebSocket connected: {connection_id}")
+
+    try:
+        while True:
+            # Receive message
+            raw = await websocket.receive_text()
+            try:
+                message = json.loads(raw)
+            except json.JSONDecodeError:
+                await _send_error(websocket, "Invalid JSON message")
+                continue
+
+            msg_type = message.get("type", "chat")
+
+            if msg_type == "chat":
+                await _handle_chat(websocket, message, connection_id)
+            elif msg_type == "upload_file":
+                await _handle_upload_file(websocket, message, connection_id)
+            elif msg_type == "upload_link":
+                await _handle_upload_link(websocket, message, connection_id)
+            elif msg_type == "upload_approval":
+                await _handle_upload_approval(websocket, message, connection_id)
+            else:
+                await _send_error(websocket, f"Unknown message type: {msg_type}")
+
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected: {connection_id}")
+    except Exception as e:
+        logger.error(f"WebSocket error ({connection_id}): {e}")
+        try:
+            await _send_error(websocket, f"Server error: {str(e)}")
+        except Exception:
+            pass
+
+
+async def _handle_chat(websocket: WebSocket, message: dict, conn_id: str):
+    """Handle a chat message."""
+    user_message = message.get("message", "").strip()
+    session_id = message.get("session_id", "")
+
+    if not user_message:
+        await _send_error(websocket, "Empty message")
+        return
+
+    logger.info(f"[{conn_id}] Chat: '{user_message[:50]}...'")
+
+    # Send "thinking" indicator
+    await _send_status(websocket, "thinking", "Processing your question...")
+
+    try:
+        graph = await _get_or_create_graph()
+
+        # Build the input state
+        input_state = {
+            "messages": [HumanMessage(content=user_message)],
+            "session_id": session_id,
+        }
+
+        # Create a unique thread ID for this conversation
+        thread_id = session_id or str(uuid.uuid4())
+        config = {"configurable": {"thread_id": thread_id}}
+
+        # Run the graph
+        result = await graph.ainvoke(input_state, config=config)
+
+        # Extract response data
+        response_data = {
+            "message": result.get("final_response", "No response generated."),
+            "query_type": result.get("query_type", "unknown"),
+            "session_id": result.get("session_id", session_id),
+            "provider": result.get("llm_provider", ""),
+            "source_chunks": result.get("source_chunks_for_display", []),
+            "relevant_files": result.get("response_files", []),
+        }
+
+        await websocket.send_json({
+            "type": "response",
+            "data": response_data,
+        })
+
+        logger.info(
+            f"[{conn_id}] Response sent: type={response_data['query_type']}, "
+            f"length={len(response_data['message'])}"
+        )
+
+    except Exception as e:
+        logger.error(f"[{conn_id}] Chat error: {e}", exc_info=True)
+        await _send_error(websocket, f"Failed to process message: {str(e)}")
+
+
+async def _handle_upload_file(websocket: WebSocket, message: dict, conn_id: str):
+    """Handle a file upload via WebSocket (base64 encoded)."""
+    import base64
+
+    filename = message.get("filename", "unknown")
+    file_data_b64 = message.get("data", "")
+    session_id = message.get("session_id", "")
+
+    if not file_data_b64:
+        await _send_error(websocket, "No file data received")
+        return
+
+    try:
+        file_bytes = base64.b64decode(file_data_b64)
+    except Exception:
+        await _send_error(websocket, "Invalid file data encoding")
+        return
+
+    logger.info(f"[{conn_id}] Upload: {filename} ({len(file_bytes)} bytes)")
+    await _send_status(websocket, "processing", f"Processing {filename}...")
+
+    try:
+        graph = await _get_or_create_graph()
+
+        input_state = {
+            "messages": [HumanMessage(content=f"Upload file: {filename}")],
+            "session_id": session_id,
+            "upload_file_info": {
+                "name": filename,
+                "source": "direct_upload",
+                "bytes": file_bytes,
+            },
+        }
+
+        thread_id = f"upload_{session_id}_{uuid.uuid4().hex[:8]}"
+        config = {"configurable": {"thread_id": thread_id}}
+
+        # Run graph — it will pause at human_approval_gate
+        result = await graph.ainvoke(input_state, config=config)
+
+        # Check if we're in interrupted state (waiting for approval)
+        state = await graph.aget_state(config)
+        if state.next and "human_approval_gate" in state.next:
+            # Send approval request to user
+            await websocket.send_json({
+                "type": "approval_request",
+                "data": {
+                    "message": result.get("final_response", ""),
+                    "proposed_location": result.get("proposed_location", {}),
+                    "thread_id": thread_id,
+                    "session_id": result.get("session_id", session_id),
+                },
+            })
+        else:
+            # Graph completed without interrupt (error or skip)
+            await websocket.send_json({
+                "type": "response",
+                "data": {
+                    "message": result.get("final_response", "Upload processed."),
+                    "query_type": "upload",
+                    "session_id": result.get("session_id", session_id),
+                },
+            })
+
+    except Exception as e:
+        logger.error(f"[{conn_id}] Upload error: {e}", exc_info=True)
+        await _send_error(websocket, f"Upload failed: {str(e)}")
+
+
+async def _handle_upload_link(websocket: WebSocket, message: dict, conn_id: str):
+    """Handle a Google Drive link upload."""
+    drive_link = message.get("link", "").strip()
+    session_id = message.get("session_id", "")
+
+    if not drive_link:
+        await _send_error(websocket, "No Drive link provided")
+        return
+
+    logger.info(f"[{conn_id}] Drive link upload: {drive_link[:60]}...")
+    await _send_status(websocket, "processing", "Downloading from Google Drive...")
+
+    try:
+        graph = await _get_or_create_graph()
+
+        input_state = {
+            "messages": [HumanMessage(content=f"Upload from Drive: {drive_link}")],
+            "session_id": session_id,
+            "upload_file_info": {
+                "name": "drive_file",
+                "source": "drive_link",
+                "drive_link": drive_link,
+            },
+        }
+
+        thread_id = f"upload_{session_id}_{uuid.uuid4().hex[:8]}"
+        config = {"configurable": {"thread_id": thread_id}}
+
+        result = await graph.ainvoke(input_state, config=config)
+
+        state = await graph.aget_state(config)
+        if state.next and "human_approval_gate" in state.next:
+            await websocket.send_json({
+                "type": "approval_request",
+                "data": {
+                    "message": result.get("final_response", ""),
+                    "proposed_location": result.get("proposed_location", {}),
+                    "thread_id": thread_id,
+                    "session_id": result.get("session_id", session_id),
+                },
+            })
+        else:
+            await websocket.send_json({
+                "type": "response",
+                "data": {
+                    "message": result.get("final_response", ""),
+                    "query_type": "upload",
+                    "session_id": result.get("session_id", session_id),
+                },
+            })
+
+    except Exception as e:
+        logger.error(f"[{conn_id}] Drive upload error: {e}", exc_info=True)
+        await _send_error(websocket, f"Drive upload failed: {str(e)}")
+
+
+async def _handle_upload_approval(websocket: WebSocket, message: dict, conn_id: str):
+    """Handle user's approval/rejection of upload location."""
+    decision = message.get("decision", "")  # "approved", "rejected", or modified path
+    thread_id = message.get("thread_id", "")
+    session_id = message.get("session_id", "")
+
+    if not thread_id:
+        await _send_error(websocket, "Missing thread_id for approval")
+        return
+
+    logger.info(f"[{conn_id}] Upload approval: {decision} (thread: {thread_id})")
+    await _send_status(websocket, "processing", "Executing upload...")
+
+    try:
+        graph = await _get_or_create_graph()
+        config = {"configurable": {"thread_id": thread_id}}
+
+        # Resume the graph with the human decision
+        await graph.aupdate_state(
+            config,
+            {"human_decision": decision},
+            as_node="human_approval_gate",
+        )
+
+        # Continue execution
+        result = await graph.ainvoke(None, config=config)
+
+        await websocket.send_json({
+            "type": "response",
+            "data": {
+                "message": result.get("final_response", "Upload complete."),
+                "query_type": "upload",
+                "session_id": result.get("session_id", session_id),
+                "upload_result": result.get("upload_result", {}),
+            },
+        })
+
+    except Exception as e:
+        logger.error(f"[{conn_id}] Approval error: {e}", exc_info=True)
+        await _send_error(websocket, f"Upload execution failed: {str(e)}")
+
+
+async def _send_error(websocket: WebSocket, message: str):
+    """Send an error message to the client."""
+    await websocket.send_json({
+        "type": "error",
+        "data": {"message": message},
+    })
+
+
+async def _send_status(websocket: WebSocket, status: str, message: str):
+    """Send a status update to the client."""
+    await websocket.send_json({
+        "type": "status",
+        "data": {"status": status, "message": message},
+    })

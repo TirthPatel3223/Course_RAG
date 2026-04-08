@@ -1,0 +1,29 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+.env
+.env.example
+.gemini/
+
+# Data (mounted as volumes)
+data/
+credentials/
+
+# Dev / Test files
+tmp/
+tests/
+docs/
+.pytest_cache/
+*.pdf
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

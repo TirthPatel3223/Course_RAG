@@ -1,0 +1,35 @@
+# ============================================
+# Caddyfile — Reverse Proxy + Auto HTTPS
+# ============================================
+# Replace YOUR_SUBDOMAIN with your DuckDNS subdomain.
+# Caddy automatically obtains and renews Let's Encrypt
+# certificates — no manual setup needed.
+#
+# Install on VPS: sudo apt install caddy
+# Start: sudo systemctl enable --now caddy
+# After editing: sudo systemctl reload caddy
+
+YOUR_SUBDOMAIN.duckdns.org {
+    # Proxy all traffic to the Docker container
+    reverse_proxy localhost:8000
+
+    # Enable WebSocket proxying for /ws/*
+    @websockets {
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+    reverse_proxy @websockets localhost:8000
+
+    # Security headers
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+    }
+
+    # Logging
+    log {
+        output file /var/log/caddy/courserag.log
+        format console
+    }
+}
