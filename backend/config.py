@@ -105,7 +105,7 @@ class Settings(BaseSettings):
 
     # --- LLM Model Settings ---
     claude_model: str = Field(
-        default="claude-sonnet-4-20250514",
+        default="claude-3-5-haiku-20241022",
         description="Claude model to use",
     )
     openai_chat_model: str = Field(

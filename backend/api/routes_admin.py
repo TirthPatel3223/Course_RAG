@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
 from backend.api.auth import get_current_user
-from backend.config import get_settings
+from backend.config import get_settings, COURSES
 from backend.services.chroma_service import get_chroma_service
 from backend.services.session_service import get_session_service
 
@@ -113,6 +113,51 @@ async def cleanup_sessions(_: bool = Depends(get_current_user)):
     sessions = get_session_service()
     deleted = sessions.cleanup_expired_sessions()
     return {"deleted": deleted, "message": f"Cleaned up {deleted} expired sessions"}
+
+
+@router.get("/upload/structure")
+async def get_upload_structure(_: bool = Depends(get_current_user)):
+    """Return the folder structure needed to populate the path-picker dropdowns."""
+    structure = []
+    for quarter, courses in COURSES.items():
+        structure.append(
+            {
+                "quarter": quarter,
+                "courses": [
+                    {
+                        "code": c.short_code,
+                        "name": c.display_name,
+                        "folder_name": c.folder_name,
+                    }
+                    for c in courses
+                ],
+            }
+        )
+    return {
+        "structure": structure,
+        "file_types": ["slides", "transcripts", "homeworks"],
+    }
+
+
+class ValidatePathRequest(BaseModel):
+    path: str
+
+
+@router.post("/upload/validate-path")
+async def validate_upload_path(
+    body: ValidatePathRequest,
+    _: bool = Depends(get_current_user),
+):
+    """Check whether a folder path exists in Google Drive (without creating it)."""
+    try:
+        from backend.services.drive_service import get_drive_service
+        drive = get_drive_service()
+        drive.authenticate()
+        exists = await asyncio.to_thread(drive.folder_exists, body.path)
+        return {"valid": exists, "path": body.path}
+    except Exception as e:
+        logger.error(f"Path validation error: {e}")
+        return {"valid": False, "path": body.path, "error": str(e)}
 
 
 @router.get("/drive/tree")

@@ -265,7 +265,8 @@ async def _handle_upload_link(websocket: WebSocket, message: dict, conn_id: str)
 
 async def _handle_upload_approval(websocket: WebSocket, message: dict, conn_id: str):
     """Handle user's approval/rejection of upload location."""
-    decision = message.get("decision", "")  # "approved", "rejected", or modified path
+    decision = message.get("decision", "")  # "approved", "rejected", or "custom"
+    custom_location = message.get("custom_location")  # structured path from path picker
     thread_id = message.get("thread_id", "")
     session_id = message.get("session_id", "")
 
@@ -280,10 +281,19 @@ async def _handle_upload_approval(websocket: WebSocket, message: dict, conn_id: 
         graph = await _get_or_create_graph()
         config = {"configurable": {"thread_id": thread_id}}
 
-        # Resume the graph with the human decision
+        # Build state update — custom path overrides the LLM-proposed location
+        if decision == "custom" and custom_location:
+            state_update = {
+                "human_decision": "approved",
+                "proposed_location": custom_location,
+            }
+            logger.info(f"[{conn_id}] Custom path: {custom_location.get('full_path')}")
+        else:
+            state_update = {"human_decision": decision}
+
         await graph.aupdate_state(
             config,
-            {"human_decision": decision},
+            state_update,
             as_node="human_approval_gate",
         )
 

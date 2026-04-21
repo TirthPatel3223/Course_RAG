@@ -121,7 +121,7 @@
                         <h2>Welcome to Course RAG</h2>
                         <p>Ask me about your UCLA MSBA courses — deadlines, concepts, lecture content, and more.</p>
                         <div class="welcome-chips">
-                            <button class="chip" data-query="When is the next homework deadline for MSA408?">📅 Homework deadlines</button>
+                            <button class="chip" data-query="List all my assignments and homeworks due within the next 7 days. Start your response by explicitly stating that these deadlines are for assignments within one week.">📅 Homework deadlines</button>
                             <button class="chip" data-query="Summarize the key topics from the latest MSA410 lecture">📚 Lecture summary</button>
                             <button class="chip" data-query="What are the main concepts covered in Operations Analytics so far?">💡 Course concepts</button>
                             <button class="chip" data-query="What is the grading policy for MSA409?">📊 Grading info</button>
@@ -161,15 +161,23 @@
                             <polyline points="26 36 32 30 38 36"/>
                         </svg>
                     </div>
-                    <p class="drop-text">Drag & drop PDF or TXT files here</p>
+                    <p class="drop-text">Drag & drop multiple PDF or TXT files here</p>
                     <p class="drop-subtext">or click to browse</p>
-                    <input type="file" id="file-input" accept=".pdf,.txt" hidden>
+                    <input type="file" id="file-input" accept=".pdf,.txt" multiple hidden>
                 </div>
 
-                <!-- Drive Link Input -->
-                <div class="divider-text"><span>or paste a Google Drive link</span></div>
-                <div class="drive-link-input">
-                    <input type="url" id="drive-link" placeholder="https://drive.google.com/file/d/...">
+                <!-- Drive Link Inputs -->
+                <div class="divider-text"><span>or paste Google Drive links</span></div>
+                <div id="drive-links-container" class="drive-links-container">
+                    <!-- Link rows injected by JS -->
+                </div>
+                <div class="drive-links-actions">
+                    <button id="btn-add-drive-link" class="btn-ghost">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
+                        </svg>
+                        Add another link
+                    </button>
                     <button id="btn-drive-upload" class="btn-secondary">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M22.54 6.42a2.78 2.78 0 00-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 00-1.94 2A29 29 0 001 11.75a29 29 0 00.46 5.33A2.78 2.78 0 003.4 19.13C5.12 19.56 12 19.56 12 19.56s6.88 0 8.6-.46a2.78 2.78 0 001.94-2 29 29 0 00.46-5.25 29 29 0 00-.46-5.33z"/>
@@ -193,6 +201,51 @@
                         <div class="approval-actions">
                             <button id="btn-approve" class="btn-primary">✅ Approve</button>
                             <button id="btn-reject" class="btn-outline">❌ Reject</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Path Picker (shown on reject) -->
+                <div id="path-picker" class="path-picker hidden">
+                    <div class="path-picker-card">
+                        <h3 class="path-picker-title">Choose Upload Location</h3>
+                        <p class="path-picker-desc">Select where this file should be stored, or edit the path directly.</p>
+
+                        <div class="path-picker-form">
+                            <div class="picker-row">
+                                <div class="form-group">
+                                    <label for="picker-quarter">Quarter</label>
+                                    <select id="picker-quarter"></select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="picker-course">Course</label>
+                                    <select id="picker-course"></select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="picker-filetype">File Type</label>
+                                    <select id="picker-filetype">
+                                        <option value="slides">Slides</option>
+                                        <option value="transcripts">Transcripts</option>
+                                        <option value="homeworks">Homeworks</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="picker-filename">Filename</label>
+                                <input type="text" id="picker-filename" placeholder="e.g. lecture3.pdf">
+                            </div>
+                            <div class="form-group">
+                                <label for="picker-fullpath">Full Path (editable)</label>
+                                <input type="text" id="picker-fullpath" placeholder="Quarter/Course:Name/type/filename.pdf">
+                                <p class="form-hint">Auto-filled from selections above, or type a custom path directly.</p>
+                            </div>
+                        </div>
+
+                        <p id="picker-validation-msg" class="picker-validation hidden"></p>
+
+                        <div class="path-picker-actions">
+                            <button id="btn-picker-confirm" class="btn-primary">Upload Here</button>
+                            <button id="btn-picker-cancel" class="btn-outline">Skip File</button>
                         </div>
                     </div>
                 </div>

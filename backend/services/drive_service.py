@@ -232,6 +232,41 @@ class DriveService:
 
         return parent_id
 
+    def folder_exists(self, path: str) -> bool:
+        """
+        Check whether a folder path exists under the root folder without creating it.
+
+        Args:
+            path: Folder path relative to root, e.g.
+                  'Spring2026/MSA408:Operations_Analytics/slides'
+
+        Returns:
+            True if every component of the path exists, False otherwise.
+        """
+        self._ensure_service()
+        try:
+            parent_id = self.get_or_create_root_folder()
+            for part in [p for p in path.split("/") if p]:
+                query = (
+                    f"name = '{part}' "
+                    f"and mimeType = '{self.FOLDER_MIME}' "
+                    f"and '{parent_id}' in parents "
+                    f"and trashed = false"
+                )
+                results = (
+                    self._service.files()
+                    .list(q=query, spaces="drive", fields="files(id)")
+                    .execute()
+                )
+                files = results.get("files", [])
+                if not files:
+                    return False
+                parent_id = files[0]["id"]
+            return True
+        except Exception as e:
+            logger.warning(f"folder_exists check failed for '{path}': {e}")
+            return False
+
     def initialize_folder_structure(self) -> dict[str, str]:
         """
         Create the full expected folder structure on Drive.

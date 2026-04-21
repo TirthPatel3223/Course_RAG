@@ -19,6 +19,7 @@ from backend.agent.nodes.upload_handler import upload_handler
 from backend.agent.nodes.location_classifier import location_classifier
 from backend.agent.nodes.upload_executor import upload_executor
 from backend.agent.nodes.response_output import response_output
+from backend.agent.nodes.source_explainer import source_explainer
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ def route_by_query_type(state: AgentState) -> str:
         "summary": "retriever_summary",
         "upload": "upload_handler",
         "general": "retriever_general",
+        "source_explanation": "source_explainer",
     }
 
     route = route_map.get(query_type, "retriever_general")
@@ -145,6 +147,9 @@ def build_graph(checkpointer=None) -> StateGraph:
     # General branch
     graph.add_node("general_responder", general_responder)
 
+    # Source explanation branch
+    graph.add_node("source_explainer", source_explainer)
+
     # Upload branch
     graph.add_node("upload_handler", upload_handler)
     graph.add_node("location_classifier", location_classifier)
@@ -169,6 +174,7 @@ def build_graph(checkpointer=None) -> StateGraph:
             "retriever_summary": "retriever_summary",
             "retriever_general": "retriever_general",
             "upload_handler": "upload_handler",
+            "source_explainer": "source_explainer",
             "response_output": "response_output",
         },
     )
@@ -185,6 +191,9 @@ def build_graph(checkpointer=None) -> StateGraph:
     # General branch
     graph.add_edge("retriever_general", "general_responder")
     graph.add_edge("general_responder", "response_output")
+
+    # Source explanation branch
+    graph.add_edge("source_explainer", "response_output")
 
     # Upload branch
     graph.add_conditional_edges(

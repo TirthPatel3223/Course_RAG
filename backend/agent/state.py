@@ -66,6 +66,10 @@ class AgentState(MessagesState):
     response_files: list[dict]
     """Files to offer for download/viewing in the UI."""
 
+    # ── Source Explanation ──
+    pending_source_clarification: Optional[list]
+    """Stored Q&A pairs (question + source_chunks) waiting for user to pick one by number."""
+
     # ── Session ──
     session_id: str
     """Active session ID for conversation continuity."""

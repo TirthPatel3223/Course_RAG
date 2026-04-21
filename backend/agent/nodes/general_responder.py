@@ -20,11 +20,23 @@ async def general_responder(state: AgentState) -> dict:
     sessions = get_session_service()
     chunks = state.get("retrieved_chunks", [])
 
-    # Get conversation history
-    history = sessions.get_messages_for_llm(state["session_id"], limit=10)
-    history_text = "\n".join(
-        f"{m['role'].upper()}: {m['content']}" for m in history[:-1]
-    ) or "(No previous conversation)"
+    # Get conversation history with compact source metadata (token-efficient)
+    full_history = sessions.get_history(state["session_id"], limit=10)
+    history_parts = []
+    for msg in full_history[:-1]:  # exclude the current user message
+        line = f"{msg['role'].upper()}: {msg['content']}"
+        if msg.get("source_chunks"):
+            meta = ", ".join(
+                "{}{} [{}]".format(
+                    c.get("file_name", "?"),
+                    f" p.{c['page_number']}" if c.get("page_number") else "",
+                    c.get("course_id", ""),
+                )
+                for c in msg["source_chunks"][:5]
+            )
+            line += f"\n[Sources used: {meta}]"
+        history_parts.append(line)
+    history_text = "\n".join(history_parts) or "(No previous conversation)"
 
     # Get current query
     messages = state.get("messages", [])

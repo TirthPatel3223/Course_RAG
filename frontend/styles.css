@@ -4,33 +4,33 @@
 */
 
 :root {
-    --bg-base: #09090b;
-    --bg-surface: rgba(24, 24, 27, 0.6);
-    --bg-surface-hover: rgba(39, 39, 42, 0.8);
-    --border-color: rgba(255, 255, 255, 0.1);
-    --text-primary: #f8fafc;
-    --text-secondary: #94a3b8;
-    --text-muted: #64748b;
+    --bg-base: #000000;
+    --bg-surface: rgba(28, 28, 30, 0.65);
+    --bg-surface-hover: rgba(44, 44, 46, 0.75);
+    --border-color: rgba(255, 255, 255, 0.15);
+    --text-primary: #ffffff;
+    --text-secondary: rgba(235, 235, 245, 0.6);
+    --text-muted: rgba(235, 235, 245, 0.3);
     
-    --primary-color: #3b82f6;
-    --primary-glow: rgba(59, 130, 246, 0.5);
-    --accent-color: #8b5cf6;
-    --accent-glow: rgba(139, 92, 246, 0.5);
+    --primary-color: #0A84FF;
+    --primary-glow: rgba(10, 132, 255, 0.5);
+    --accent-color: #5E5CE6;
+    --accent-glow: rgba(94, 92, 230, 0.5);
     
-    --success: #10b981;
-    --danger: #ef4444;
-    --warning: #f59e0b;
+    --success: #32D74B;
+    --danger: #FF453A;
+    --warning: #FF9F0A;
     
-    --radius-sm: 6px;
-    --radius-md: 12px;
-    --radius-lg: 20px;
+    --radius-sm: 8px;
+    --radius-md: 16px;
+    --radius-lg: 24px;
     
-    --shadow-glass: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-    --backdrop-blur: blur(12px);
+    --shadow-glass: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+    --backdrop-blur: blur(30px) saturate(180%);
     
-    --font-heading: 'Inter', system-ui, sans-serif;
-    --font-body: 'Inter', system-ui, sans-serif;
-    --font-mono: 'JetBrains Mono', monospace;
+    --font-heading: 'Tiempos Headline', 'Georgia', 'Times New Roman', serif;
+    --font-body: 'Söhne', 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: 'Söhne Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 * {
@@ -61,9 +61,10 @@ body {
     left: -50%;
     width: 200%;
     height: 200%;
-    background: radial-gradient(circle at 50% 50%, var(--primary-glow) 0%, transparent 20%),
-                radial-gradient(circle at 80% 20%, var(--accent-glow) 0%, transparent 20%);
-    opacity: 0.15;
+    background: radial-gradient(circle at 30% 30%, var(--primary-glow) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, var(--accent-glow) 0%, transparent 40%),
+                radial-gradient(circle at 50% 80%, rgba(255, 55, 95, 0.3) 0%, transparent 50%);
+    opacity: 0.8;
     z-index: -2;
     animation: rotateBg 30s linear infinite;
     pointer-events: none;
@@ -399,22 +400,25 @@ body {
 }
 
 .message-bubble {
-    padding: 14px 20px;
+    padding: 18px 24px;
     border-radius: var(--radius-lg);
     font-size: 15px;
-    line-height: 1.6;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    line-height: 1.7;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3), inset 0 1px 1px rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
 }
 
 .message.human .message-bubble {
-    background: linear-gradient(135deg, var(--primary-color), #2563eb);
+    background: linear-gradient(135deg, rgba(10, 132, 255, 0.8), rgba(94, 92, 230, 0.8));
     color: white;
+    border: 1px solid rgba(255, 255, 255, 0.2);
     border-bottom-right-radius: 4px;
 }
 
 .message.assistant .message-bubble {
-    background: rgba(30, 30, 34, 0.8);
-    border: 1px solid var(--border-color);
+    background: rgba(35, 35, 37, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.15);
     border-bottom-left-radius: 4px;
 }
 
@@ -684,24 +688,193 @@ body {
     padding: 0 16px;
 }
 
-.drive-link-input {
+/* ── Drive link list ── */
+
+.drive-links-container {
     display: flex;
-    gap: 12px;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 12px;
 }
 
-.drive-link-input input {
+.drive-link-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.drive-link-row .drive-link-input {
     flex: 1;
     background: rgba(0, 0, 0, 0.2);
     border: 1px solid var(--border-color);
-    padding: 14px 16px;
+    padding: 12px 16px;
     border-radius: var(--radius-md);
     color: white;
     font-size: 15px;
+    transition: border-color 0.2s;
 }
 
-.drive-link-input input:focus {
+.drive-link-row .drive-link-input:focus {
     outline: none;
     border-color: var(--primary-color);
+}
+
+.btn-remove-link {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    width: 38px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+
+.btn-remove-link:hover {
+    border-color: var(--danger);
+    color: var(--danger);
+    background: rgba(255, 69, 58, 0.08);
+}
+
+.btn-remove-link svg { width: 16px; height: 16px; }
+
+.drive-links-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 12px;
+    align-items: center;
+}
+
+.btn-ghost {
+    background: transparent;
+    border: 1px dashed var(--border-color);
+    color: var(--text-secondary);
+    padding: 10px 16px;
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s;
+}
+
+.btn-ghost:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.btn-ghost svg { width: 16px; height: 16px; }
+
+/* ── Path Picker ── */
+
+.path-picker {
+    margin-top: 24px;
+}
+
+.path-picker-card {
+    background: rgba(24, 24, 27, 0.85);
+    border: 1px solid var(--primary-color);
+    border-radius: var(--radius-md);
+    padding: 28px;
+    box-shadow: 0 0 24px rgba(10, 132, 255, 0.12);
+}
+
+.path-picker-title {
+    font-size: 17px;
+    font-weight: 600;
+    margin: 0 0 6px;
+}
+
+.path-picker-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin: 0 0 24px;
+}
+
+.path-picker-form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.picker-row {
+    display: grid;
+    grid-template-columns: 1fr 2fr 1fr;
+    gap: 12px;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.form-group label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.form-group select,
+.form-group input[type="text"] {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: white;
+    padding: 10px 14px;
+    font-size: 14px;
+    transition: border-color 0.2s;
+    appearance: none;
+}
+
+.form-group select:focus,
+.form-group input[type="text"]:focus {
+    outline: none;
+    border-color: var(--primary-color);
+}
+
+.form-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin: 4px 0 0;
+}
+
+.picker-validation {
+    margin-top: 14px;
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    background: rgba(255, 159, 10, 0.1);
+    border: 1px solid var(--warning);
+    color: var(--warning);
+}
+
+.picker-validation.error {
+    background: rgba(255, 69, 58, 0.1);
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+.picker-validation.valid {
+    background: rgba(50, 215, 75, 0.1);
+    border-color: var(--success);
+    color: var(--success);
+}
+
+.path-picker-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 24px;
+    border-top: 1px solid var(--border-color);
+    padding-top: 20px;
 }
 
 .btn-secondary {
@@ -980,14 +1153,39 @@ body {
     background: rgba(0, 0, 0, 0.2);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
-    padding: 12px;
+    padding: 16px;
     margin-top: 16px;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .message-bubble summary {
     cursor: pointer;
-    font-weight: 500;
+    font-weight: 600;
     outline: none;
+    padding: 4px 0;
+}
+
+.message-bubble p {
+    margin-top: 0;
+    margin-bottom: 14px;
+}
+
+.message-bubble p:last-child {
+    margin-bottom: 0;
+}
+
+.message-bubble ul, .message-bubble ol {
+    margin-top: 0;
+    margin-bottom: 14px;
+    padding-left: 24px;
+}
+
+.message-bubble li {
+    margin-bottom: 6px;
+}
+
+.message-bubble li:last-child {
+    margin-bottom: 0;
 }
 
 .message-bubble a {

@@ -13,6 +13,10 @@ Classify the user's query into exactly ONE of these categories:
 - "deadline": Questions about due dates, deadlines, submission times, exam dates
 - "summary": Requests to summarize lectures, topics, slides, or course content
 - "upload": Requests to upload a file, add a document, or store material
+- "source_explanation": Questions asking WHY a specific file/document/source was included in
+  a previous response, or asking to see the specific text/excerpt that led to a previous answer.
+  Examples: "why did you give me that file", "which part of the document said that",
+  "show me where that came from", "why did you mention that source"
 - "general": Any other course-related question (explanations, concepts, etc.)
 
 Consider the conversation history for context. For example, if the user previously
@@ -38,10 +42,13 @@ CONTEXT_DETECTION_SYSTEM = """You analyze user queries about university courses 
 Available courses for {quarter}:
 {courses_list}
 
+Current Date: {current_date}
+Current Day of Week: {day_of_week}
+
 Extract:
 - course_id: The short course code if mentioned (e.g., "MSA408"), or null
 - quarter: The quarter if mentioned (e.g., "Spring2026"), or null  
-- optimized_query: A rephrased version of the query optimized for semantic search
+- optimized_query: A rephrased version of the query optimized for semantic search. IMPORTANT: You MUST resolve relative time (like "tomorrow", "next week", "today") into explicit days of the week (e.g. "Tuesday") or exact dates based on the Current Date provided above to optimize semantic search matching!
 
 Respond with ONLY a JSON object: {{"course_id": ..., "quarter": ..., "optimized_query": "..."}}"""
 
@@ -239,6 +246,28 @@ Please confirm:
 - **Approve** this location
 - **Modify** the path
 - **Reject** the upload"""
+
+SOURCE_CLARIFICATION_TEMPLATE = """Which question are you asking about? Here are your previous questions that returned source documents:
+
+{question_list}
+
+Please reply with the number of the question."""
+
+SOURCE_EVIDENCE_HEADER = """**Source Evidence for:** *{question}*
+
+The following document excerpts were retrieved and used to answer that question:
+
+"""
+
+SOURCE_CHUNK_TEMPLATE = """**Excerpt {n}** — `{file_name}`{page_info}{course_info}
+
+> {text}
+
+"""
+
+SOURCE_NO_CHUNKS_RESPONSE = "I didn't provide you with any source documents in our conversation so far."
+
+SOURCE_MORE_CHUNKS_NOTE = "\n*Note: {extra} additional chunk(s) were retrieved but are not shown here.*"
 
 UPLOAD_COMPLETE_TEMPLATE = """**Upload Complete**
 
