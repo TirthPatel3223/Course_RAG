@@ -9,7 +9,7 @@
 # Start: sudo systemctl enable --now caddy
 # After editing: sudo systemctl reload caddy
 
-tirth-course-rag.duckdns.org {
+tirth-courserag.duckdns.org {
     # Proxy all traffic to the Docker container
     reverse_proxy localhost:8000
 
