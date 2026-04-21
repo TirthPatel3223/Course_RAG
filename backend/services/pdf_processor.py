@@ -234,33 +234,51 @@ class PDFProcessor:
                 page_infos.append(image_list)
 
             import asyncio
-            sem = asyncio.Semaphore(5)
+
+            # Limit concurrency to 2 and track consecutive failures to bail early
+            sem = asyncio.Semaphore(2)
+            vision_failures = 0
+            MAX_CONSECUTIVE_FAILURES = 5
+            VISION_TIMEOUT_SECS = 25
 
             async def process_page(page_idx):
+                nonlocal vision_failures
                 text = extracted_texts[page_idx]
                 image_list = page_infos[page_idx]
                 vision_used_here = False
-                
-                if client is not None and len(text) < VISION_FALLBACK_THRESHOLD:
+
+                needs_vision = client is not None and len(text) < VISION_FALLBACK_THRESHOLD
+                too_many_failures = vision_failures >= MAX_CONSECUTIVE_FAILURES
+
+                if needs_vision and not too_many_failures:
                     async with sem:
                         try:
                             page = doc[page_idx]
                             png_b64 = self._render_page_png_b64(page)
-                            vision_text = await self._vision_transcribe(
-                                client, model, png_b64
+                            vision_text = await asyncio.wait_for(
+                                self._vision_transcribe(client, model, png_b64),
+                                timeout=VISION_TIMEOUT_SECS,
                             )
                             if vision_text and vision_text.strip().upper() != "EMPTY":
                                 text = self._clean_text(vision_text)
                                 vision_used_here = True
+                                vision_failures = 0
                                 logger.info(
                                     f"{filename} p{page_idx + 1}: vision recovered "
                                     f"{len(text)} chars"
                                 )
                         except Exception as e:
+                            vision_failures += 1
                             logger.warning(
-                                f"{filename} p{page_idx + 1}: vision fallback failed: {e}"
+                                f"{filename} p{page_idx + 1}: vision fallback failed "
+                                f"(failures={vision_failures}): {e}"
                             )
-                        
+                            if vision_failures >= MAX_CONSECUTIVE_FAILURES:
+                                logger.warning(
+                                    f"{filename}: too many vision failures, "
+                                    "skipping vision for remaining pages"
+                                )
+
                 return PDFPage(
                     page_number=page_idx + 1,
                     text=text,
@@ -269,7 +287,6 @@ class PDFProcessor:
                     image_count=len(image_list),
                 ), vision_used_here
 
-            import asyncio
             results = await asyncio.gather(*(process_page(i) for i in range(total_pages)))
             
             for page_obj, v_used in results:
