@@ -33,3 +33,6 @@ Thumbs.db
 tmp/
 .pytest_cache/
 *.pdf
+
+# Local-only docs
+docs/problems_solutions.md
