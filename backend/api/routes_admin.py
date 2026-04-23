@@ -262,21 +262,24 @@ async def _run_reembed(
                     continue
 
                 if chunks:
-                    # Embed
-                    chunk_texts = [c.text for c in chunks]
-                    embeddings = await embedder.embed_batch(chunk_texts)
-
-                    # Store
-                    await asyncio.to_thread(
-                        chroma.add_documents,
-                        ids=[c.chunk_id for c in chunks],
-                        embeddings=embeddings,
-                        documents=chunk_texts,
-                        metadatas=[c.metadata for c in chunks],
-                    )
+                    # Embed in sub-batches to keep memory usage low
+                    SUB_BATCH = 50
+                    for b_start in range(0, len(chunks), SUB_BATCH):
+                        sub = chunks[b_start : b_start + SUB_BATCH]
+                        sub_texts = [c.text for c in sub]
+                        sub_embeddings = await embedder.embed_batch(sub_texts)
+                        await asyncio.to_thread(
+                            chroma.add_documents,
+                            ids=[c.chunk_id for c in sub],
+                            embeddings=sub_embeddings,
+                            documents=sub_texts,
+                            metadatas=[c.metadata for c in sub],
+                        )
                     _reembed_status["chunks_created"] += len(chunks)
 
                 _reembed_status["files_processed"] += 1
+                # Brief pause between files to let memory settle
+                await asyncio.sleep(0.5)
 
             except Exception as e:
                 logger.error(f"Failed to process {filename}: {e}")

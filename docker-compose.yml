@@ -26,6 +26,8 @@ services:
       - CHROMA_PERSIST_DIR=data/chroma_db
       - GOOGLE_CREDENTIALS_PATH=credentials/oauth_credentials.json
       - GOOGLE_TOKEN_PATH=credentials/token.pickle
+    mem_limit: 6g
+    memswap_limit: 6g
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 30s
