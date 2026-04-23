@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 
 class LoginRequest(BaseModel):
+    username: str
     password: str
 
 
@@ -20,6 +21,7 @@ class LoginResponse(BaseModel):
     success: bool
     message: str
     token: Optional[str] = None
+    role: Optional[str] = None
 
 
 # ──────────────────────────────────────────────

@@ -68,7 +68,11 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", description="OpenAI API key")
 
     # --- Authentication ---
-    app_password: str = Field(default="changeme", description="Web interface password")
+    app_password: str = Field(default="changeme", description="Legacy single-password (unused)")
+    admin_username: str = Field(default="admin", description="Admin username")
+    admin_password: str = Field(default="changeme", description="Admin password")
+    viewer_username: str = Field(default="viewer", description="Viewer username")
+    viewer_password: str = Field(default="changeme", description="Viewer password")
 
     # --- Google Drive ---
     google_credentials_path: str = Field(

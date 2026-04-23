@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
-from backend.api.auth import get_current_user
+from backend.api.auth import require_admin
 from backend.config import get_settings, COURSES
 from backend.services.chroma_service import get_chroma_service
 from backend.services.session_service import get_session_service
@@ -37,7 +37,7 @@ class ReembedRequest(BaseModel):
 
 
 @router.get("/stats")
-async def get_system_stats(_: bool = Depends(get_current_user)):
+async def get_system_stats(_: dict = Depends(require_admin)):
     """Get system health and statistics."""
     chroma = get_chroma_service()
     sessions = get_session_service()
@@ -71,7 +71,7 @@ async def get_system_stats(_: bool = Depends(get_current_user)):
 async def trigger_reembed(
     request: ReembedRequest,
     background_tasks: BackgroundTasks,
-    _: bool = Depends(get_current_user),
+    _: dict = Depends(require_admin),
 ):
     """Trigger re-embedding of documents from Google Drive."""
     global _reembed_status
@@ -102,13 +102,13 @@ async def trigger_reembed(
 
 
 @router.get("/reembed/status")
-async def get_reembed_status(_: bool = Depends(get_current_user)):
+async def get_reembed_status(_: dict = Depends(require_admin)):
     """Get the current re-embedding status."""
     return _reembed_status
 
 
 @router.post("/sessions/cleanup")
-async def cleanup_sessions(_: bool = Depends(get_current_user)):
+async def cleanup_sessions(_: dict = Depends(require_admin)):
     """Remove expired sessions."""
     sessions = get_session_service()
     deleted = sessions.cleanup_expired_sessions()
@@ -116,7 +116,7 @@ async def cleanup_sessions(_: bool = Depends(get_current_user)):
 
 
 @router.get("/upload/structure")
-async def get_upload_structure(_: bool = Depends(get_current_user)):
+async def get_upload_structure(_: dict = Depends(require_admin)):
     """Return the folder structure needed to populate the path-picker dropdowns."""
     structure = []
     for quarter, courses in COURSES.items():
@@ -146,7 +146,7 @@ class ValidatePathRequest(BaseModel):
 @router.post("/upload/validate-path")
 async def validate_upload_path(
     body: ValidatePathRequest,
-    _: bool = Depends(get_current_user),
+    _: dict = Depends(require_admin),
 ):
     """Check whether a folder path exists in Google Drive (without creating it)."""
     try:
@@ -161,7 +161,7 @@ async def validate_upload_path(
 
 
 @router.get("/drive/tree")
-async def get_drive_tree(_: bool = Depends(get_current_user)):
+async def get_drive_tree(_: dict = Depends(require_admin)):
     """Get the Google Drive folder tree."""
     try:
         from backend.services.drive_service import get_drive_service
@@ -176,7 +176,7 @@ async def get_drive_tree(_: bool = Depends(get_current_user)):
 @router.get("/drive/files")
 async def list_drive_files(
     quarter: Optional[str] = None,
-    _: bool = Depends(get_current_user),
+    _: dict = Depends(require_admin),
 ):
     """List all files on Drive."""
     try:

@@ -51,7 +51,8 @@ class SessionService:
                 CREATE TABLE IF NOT EXISTS sessions (
                     session_id TEXT PRIMARY KEY,
                     created_at TEXT NOT NULL,
-                    last_active TEXT NOT NULL
+                    last_active TEXT NOT NULL,
+                    message_count INTEGER DEFAULT 0
                 );
 
                 CREATE TABLE IF NOT EXISTS messages (
@@ -71,6 +72,14 @@ class SessionService:
             """
             )
             conn.commit()
+            # Migration: add message_count to existing databases
+            try:
+                conn.execute(
+                    "ALTER TABLE sessions ADD COLUMN message_count INTEGER DEFAULT 0"
+                )
+                conn.commit()
+            except Exception:
+                pass  # Column already exists
         finally:
             conn.close()
 
@@ -245,6 +254,35 @@ class SessionService:
         try:
             row = conn.execute("SELECT COUNT(*) as cnt FROM sessions").fetchone()
             return row["cnt"]
+        finally:
+            conn.close()
+
+    def get_viewer_message_count(self, session_id: str) -> int:
+        """Return the number of viewer messages sent in this session."""
+        conn = self._get_conn()
+        try:
+            row = conn.execute(
+                "SELECT message_count FROM sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            return int(row["message_count"]) if row else 0
+        finally:
+            conn.close()
+
+    def increment_viewer_message_count(self, session_id: str) -> int:
+        """Increment and return the new message count for a viewer session."""
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                "UPDATE sessions SET message_count = message_count + 1 WHERE session_id = ?",
+                (session_id,),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT message_count FROM sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            return int(row["message_count"]) if row else 0
         finally:
             conn.close()
 

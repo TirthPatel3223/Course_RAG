@@ -1,96 +1,300 @@
-# Course RAG Pipeline
+# Course RAG — UCLA MSBA Document Assistant
 
-An agentic RAG pipeline for querying UCLA MSBA course materials — deadlines, summaries, and general Q&A. Built with **LangGraph**, **ChromaDB**, **OpenAI embeddings**, and deployed on **Oracle Cloud Free Tier**.
+An agentic RAG (Retrieval-Augmented Generation) pipeline that lets UCLA MSBA students query their course materials through a chat interface. Ask about deadlines, get lecture summaries, or ask general questions about course content — the system routes each query to a specialized agent branch and retrieves the most relevant chunks from a self-hosted vector store.
+
+**Live at:** `https://tirth-courserag.duckdns.org`
+
+---
+
+## What it does
+
+- **Chat with your course documents** — slides, lecture transcripts, and homework PDFs indexed and searchable via semantic similarity
+- **Deadline tracking** — specialized branch that extracts and cross-references assignment due dates with self-verification
+- **Lecture summarization** — retrieve and synthesize content across an entire course or specific lectures
+- **File upload pipeline** — drag-and-drop or Google Drive link → LLM classifies the file → proposes a Drive folder → human approves → file is uploaded and embedded automatically
+- **Admin dashboard** — trigger re-embedding runs, monitor ChromaDB stats, manage sessions
+- **Two-tier access** — admin users have full access; viewer users get read-only chat with rate limiting
+
+---
 
 ## Architecture
 
-- **Frontend**: Web-based chat interface (HTML/CSS/JS)
-- **Backend**: FastAPI + WebSocket
-- **Agent**: LangGraph with 4 branches (Deadline, Summary, Upload, General)
-- **Vector Store**: ChromaDB (self-hosted)
-- **File Storage**: Google Drive (g.ucla.edu)
-- **LLM**: Claude Sonnet 4 (primary) + GPT-4o-mini (fallback)
-- **Embeddings**: OpenAI `text-embedding-3-small`
+```
+Browser (HTML/CSS/JS)
+        │  WebSocket + REST
+        ▼
+FastAPI (uvicorn)
+        │
+        ├── /api/login         → HMAC-signed token (admin or viewer)
+        ├── /api/verify        → token validation
+        ├── /ws/chat           → WebSocket — all real-time interaction
+        └── /api/admin/*       → admin-only REST endpoints
+                │
+                ▼
+        LangGraph Agent
+                │
+        ┌───────┴────────────────────────────┐
+        │                                    │
+   Query Router                       Upload Pipeline
+   (LLM classifier)                   (LLM classifier → human approval)
+        │
+   ┌────┴──────────────────┐
+   │         │             │
+Deadline  Summary       General
+ Branch    Branch        Branch
+   │         │             │
+   └────┬────┘             │
+        │                  │
+   ChromaDB retrieval ◄────┘
+   (text-embedding-3-small)
+        │
+   Claude Sonnet 4 (primary)
+   GPT-4o-mini (fallback)
+        │
+   Self-verification node
+        │
+   Final response → WebSocket
+```
 
-## Quick Start
+### Key components
 
-### 1. Clone & Install
+| Layer | Technology |
+|---|---|
+| Frontend | Vanilla HTML/CSS/JS, WebSocket, marked.js |
+| Backend | FastAPI, uvicorn, Python 3.11 |
+| Agent | LangGraph (StateGraph with checkpointing) |
+| Vector store | ChromaDB (self-hosted, persistent) |
+| Embeddings | OpenAI `text-embedding-3-small` (1536d) |
+| LLM (primary) | Anthropic Claude Sonnet 4 |
+| LLM (fallback) | OpenAI GPT-4o-mini |
+| File storage | Google Drive (g.ucla.edu) |
+| Session DB | SQLite (aiosqlite) |
+| Auth | Custom HMAC-SHA256 tokens (no JWT library) |
+| Deployment | Docker + Caddy reverse proxy on Oracle Cloud Free Tier |
+
+---
+
+## Agent workflow
+
+Each WebSocket `chat` message runs through this LangGraph pipeline:
+
+```
+input
+  └─► query_classifier        — LLM decides: deadline / summary / general / upload
+        ├─► deadline_retriever — semantic search with deadline-keyword-boosted metadata filter
+        │     └─► deadline_verifier   — cross-checks extracted dates against source chunks
+        │           └─► response_builder
+        ├─► summary_retriever  — wide retrieval (top-10 chunks) across a course
+        │     └─► summary_generator
+        │           └─► response_builder
+        ├─► general_retriever  — standard top-7 semantic search
+        │     └─► general_responder
+        │           └─► response_builder
+        └─► upload_pipeline    — see Upload section below
+```
+
+The graph uses LangGraph's SQLite checkpointer so multi-turn conversations are persisted per `thread_id` (= `session_id`).
+
+### Upload pipeline
+
+```
+upload_file / upload_link message
+  └─► file_classifier (LLM)   — proposes quarter / course / file_type / path
+        └─► human_approval_gate (interrupt)
+              ├─ approved  → drive_uploader → embed_new_chunks → response
+              ├─ custom    → user picks path in UI → drive_uploader → embed_new_chunks
+              └─ rejected  → skip
+```
+
+---
+
+## Authentication
+
+Two roles, credentials stored in `.env`:
+
+| Role | Access |
+|---|---|
+| **admin** | Full access — chat (all query types), file upload, admin panel, re-embed |
+| **viewer** | Chat only — `general` and `deadline` queries, no uploads, no admin panel, 10 messages/session |
+
+Tokens are HMAC-SHA256 signed, 24-hour expiry, no external JWT library. The payload encodes `username`, `role`, and a timestamp. Viewers hitting the rate limit or attempting restricted actions get a clear inline message in the chat UI.
+
+### Token structure
+
+```
+base64url({"ts":"<unix>","v":2,"role":"admin","username":"..."}) . hex(HMAC-SHA256(password, payload))
+```
+
+---
+
+## Project structure
+
+```
+Course_RAG/
+├── backend/
+│   ├── main.py                  # FastAPI app, login/verify endpoints, static serving
+│   ├── config.py                # Pydantic Settings, course registry (COURSES dict)
+│   ├── agent/
+│   │   ├── graph.py             # LangGraph StateGraph definition
+│   │   ├── state.py             # AgentState TypedDict
+│   │   ├── prompts.py           # All LLM prompt templates
+│   │   └── nodes/               # One file per graph node
+│   │       ├── query_classifier.py
+│   │       ├── deadline_retriever.py
+│   │       ├── deadline_verifier.py
+│   │       ├── summary_retriever.py
+│   │       ├── summary_generator.py
+│   │       ├── general_retriever.py
+│   │       ├── general_responder.py
+│   │       ├── file_classifier.py
+│   │       ├── human_approval_gate.py
+│   │       ├── drive_uploader.py
+│   │       └── response_builder.py
+│   ├── api/
+│   │   ├── auth.py              # HMAC token generation/verification, FastAPI dependencies
+│   │   ├── routes_chat.py       # WebSocket endpoint, message handlers
+│   │   └── routes_admin.py      # Admin REST endpoints (require_admin protected)
+│   ├── models/
+│   │   └── schemas.py           # Pydantic request/response models
+│   └── services/
+│       ├── llm_service.py       # Claude + OpenAI fallback wrapper
+│       ├── chroma_service.py    # ChromaDB CRUD
+│       ├── drive_service.py     # Google Drive OAuth + file ops
+│       ├── embedding_service.py # OpenAI embedding calls with sub-batching
+│       ├── pdf_processor.py     # PyMuPDF extraction + vision fallback
+│       ├── text_processor.py    # Chunking (slides vs transcripts), metadata tagging
+│       └── session_service.py   # SQLite session + message history + viewer rate limit
+├── frontend/
+│   ├── index.html               # Single-page app shell
+│   ├── styles.css               # Design system (dark theme, CSS variables)
+│   └── app.js                   # WebSocket client, role-aware UI, upload queue
+├── scripts/
+│   ├── setup_drive.py           # Google OAuth consent flow
+│   ├── initial_embed.py         # First-run Drive → ChromaDB embedding
+│   ├── setup_oracle.sh          # VPS provisioning (Docker, Caddy, firewall)
+│   └── deploy.sh                # Local → VPS rsync + container restart
+├── Dockerfile
+├── docker-compose.yml
+├── Caddyfile                    # HTTPS reverse proxy config
+├── .env.example                 # Credential template
+└── requirements.txt
+```
+
+---
+
+## Setup
+
+### Prerequisites
+
+- Python 3.11+
+- Docker (for deployment)
+- Anthropic API key
+- OpenAI API key
+- Google Cloud project with Drive API enabled + OAuth credentials
+
+### 1. Clone & install
+
 ```bash
-git clone https://github.com/YOUR_USERNAME/Course_RAG.git
+git clone https://github.com/TirthPatel3223/Course_RAG.git
 cd Course_RAG
 python -m venv venv
-source venv/bin/activate  # or .\venv\Scripts\Activate.ps1 on Windows
+source venv/bin/activate       # Windows: .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-### 2. Configure
+### 2. Configure environment
+
 ```bash
 cp .env.example .env
-# Edit .env with your API keys
 ```
 
-### 3. Setup Google Drive
+Edit `.env`:
+
+```env
+ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-proj-...
+
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=your_secure_admin_password
+
+VIEWER_USERNAME=viewer
+VIEWER_PASSWORD=your_viewer_password
+
+GOOGLE_CREDENTIALS_PATH=credentials/oauth_credentials.json
+GOOGLE_TOKEN_PATH=credentials/token.pickle
+DRIVE_ROOT_FOLDER=Course_RAG_Data
+
+CURRENT_QUARTER=Spring2026
+```
+
+### 3. Google Drive OAuth
+
+Place your `oauth_credentials.json` (downloaded from Google Cloud Console) in `credentials/`, then run:
+
 ```bash
 python scripts/setup_drive.py
 ```
 
-### 4. Initial Embedding
+This opens a browser for the one-time OAuth consent and saves `token.pickle`.
+
+### 4. Initial embedding
+
 ```bash
 python scripts/initial_embed.py
 ```
 
-### 5. Run Locally
+Downloads all PDFs and TXTs from Drive, chunks them, and loads embeddings into ChromaDB (`data/chroma_db/`).
+
+### 5. Run locally
+
 ```bash
 uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
-Open http://localhost:8000
 
-## Docker Deployment
+Open [http://localhost:8000](http://localhost:8000) — log in with your admin credentials.
+
+---
+
+## Docker deployment
 
 ```bash
 docker compose up -d --build
 ```
 
-## Production Deployment (Oracle Cloud)
+The compose file mounts `data/`, `credentials/`, and `.env` as volumes so state persists across container restarts.
 
-See `docs/implementation_plan.md` for full deployment guide.
+### Oracle Cloud Free Tier (production)
 
 ```bash
-# On the VPS (first time):
+# First time — provision the VPS
 sudo ./scripts/setup_oracle.sh
 
-# From your local machine (deploy updates):
+# Deploy updates from your local machine
 ./scripts/deploy.sh <VPS_IP> <SSH_KEY_PATH>
 ```
 
-## Project Structure
+HTTPS is handled by [Caddy](https://caddyserver.com/) via the `Caddyfile` — automatic TLS with Let's Encrypt.
 
+---
+
+## Course configuration
+
+Courses are defined statically in [backend/config.py](backend/config.py) under the `COURSES` dict:
+
+```python
+COURSES = {
+    "Spring2026": [
+        CourseInfo("MSA408", "26S-MGMTMSA-408-LEC-2", "Operations_Analytics"),
+        CourseInfo("MSA409", "26S-MGMTMSA-409-01/02", "Competitive_Analytics"),
+        CourseInfo("MSA410", "26S-MGMTMSA-410-LEC-2", "Customer_Analytics"),
+        CourseInfo("MSA413", "26S-MGMTMSA-413-SEM-1", "Industry_Seminar_II"),
+    ],
+}
 ```
-Course_RAG/
-├── backend/
-│   ├── main.py              # FastAPI entry point
-│   ├── config.py            # Settings & course registry
-│   ├── agent/               # LangGraph agent
-│   │   ├── graph.py         # Graph definition
-│   │   ├── state.py         # Agent state
-│   │   ├── prompts.py       # LLM prompts
-│   │   └── nodes/           # 11 agent nodes
-│   ├── services/            # Business logic
-│   │   ├── llm_service.py   # Claude + OpenAI fallback
-│   │   ├── chroma_service.py
-│   │   ├── drive_service.py
-│   │   └── ...
-│   ├── api/                 # REST + WebSocket routes
-│   └── models/              # Pydantic schemas
-├── frontend/
-│   ├── index.html           # Main SPA
-│   ├── styles.css           # Design system
-│   └── app.js               # Client logic
-├── scripts/                 # Setup & deploy scripts
-├── Dockerfile
-├── docker-compose.yml
-└── Caddyfile                # Reverse proxy config
-```
+
+Add new quarters/courses here. Drive folder structure is derived automatically from this registry.
+
+---
 
 ## License
 

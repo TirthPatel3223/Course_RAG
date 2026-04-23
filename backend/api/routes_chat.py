@@ -41,18 +41,19 @@ async def websocket_chat(websocket: WebSocket):
     3. Server sends JSON: {"type": "response", "data": {...}}
     4. For uploads: {"type": "upload_approval", "data": {"decision": "approved"}}
     """
-    # Verify authentication
-    if not await verify_ws_token(websocket):
+    token_payload = await verify_ws_token(websocket)
+    if not token_payload:
         await websocket.close(code=4001, reason="Authentication required")
         return
 
+    role = token_payload.get("role", "viewer")
+
     await websocket.accept()
     connection_id = str(uuid.uuid4())[:8]
-    logger.info(f"WebSocket connected: {connection_id}")
+    logger.info(f"WebSocket connected: {connection_id} (role={role})")
 
     try:
         while True:
-            # Receive message
             raw = await websocket.receive_text()
             try:
                 message = json.loads(raw)
@@ -62,8 +63,17 @@ async def websocket_chat(websocket: WebSocket):
 
             msg_type = message.get("type", "chat")
 
+            # Viewers may not upload
+            if role == "viewer" and msg_type in ("upload_file", "upload_link", "upload_approval"):
+                await _send_error(
+                    websocket,
+                    "File uploads are not available in Viewer mode. Contact Tirth for full access.",
+                    code="VIEWER_RESTRICTED",
+                )
+                continue
+
             if msg_type == "chat":
-                await _handle_chat(websocket, message, connection_id)
+                await _handle_chat(websocket, message, connection_id, role=role)
             elif msg_type == "upload_file":
                 await _handle_upload_file(websocket, message, connection_id)
             elif msg_type == "upload_link":
@@ -83,7 +93,11 @@ async def websocket_chat(websocket: WebSocket):
             pass
 
 
-async def _handle_chat(websocket: WebSocket, message: dict, conn_id: str):
+VIEWER_ALLOWED_QUERY_TYPES = {"general", "deadline"}
+VIEWER_MESSAGE_LIMIT = 10
+
+
+async def _handle_chat(websocket: WebSocket, message: dict, conn_id: str, role: str = "admin"):
     """Handle a chat message."""
     user_message = message.get("message", "").strip()
     session_id = message.get("session_id", "")
@@ -92,31 +106,53 @@ async def _handle_chat(websocket: WebSocket, message: dict, conn_id: str):
         await _send_error(websocket, "Empty message")
         return
 
-    logger.info(f"[{conn_id}] Chat: '{user_message[:50]}...'")
+    # Viewer rate limiting
+    if role == "viewer":
+        sessions = get_session_service()
+        count = sessions.get_viewer_message_count(session_id)
+        if count >= VIEWER_MESSAGE_LIMIT:
+            await _send_error(
+                websocket,
+                "You've reached the session limit. Contact Tirth for full access.",
+                code="VIEWER_RATE_LIMIT",
+            )
+            return
 
-    # Send "thinking" indicator
+    logger.info(f"[{conn_id}] Chat ({role}): '{user_message[:50]}...'")
     await _send_status(websocket, "thinking", "Processing your question...")
 
     try:
         graph = await _get_or_create_graph()
 
-        # Build the input state
         input_state = {
             "messages": [HumanMessage(content=user_message)],
             "session_id": session_id,
         }
 
-        # Create a unique thread ID for this conversation
         thread_id = session_id or str(uuid.uuid4())
         config = {"configurable": {"thread_id": thread_id}}
 
-        # Run the graph
         result = await graph.ainvoke(input_state, config=config)
 
-        # Extract response data
+        query_type = result.get("query_type", "unknown")
+
+        # Viewers cannot use summarization queries
+        if role == "viewer" and query_type not in VIEWER_ALLOWED_QUERY_TYPES:
+            await _send_error(
+                websocket,
+                "Summarization is not available in Viewer mode. Contact Tirth for full access.",
+                code="VIEWER_RESTRICTED",
+            )
+            return
+
+        # Increment viewer message count after a successful response
+        if role == "viewer":
+            sessions = get_session_service()
+            sessions.increment_viewer_message_count(session_id)
+
         response_data = {
             "message": result.get("final_response", "No response generated."),
-            "query_type": result.get("query_type", "unknown"),
+            "query_type": query_type,
             "session_id": result.get("session_id", session_id),
             "provider": result.get("llm_provider", ""),
             "source_chunks": result.get("source_chunks_for_display", []),
@@ -129,7 +165,7 @@ async def _handle_chat(websocket: WebSocket, message: dict, conn_id: str):
         })
 
         logger.info(
-            f"[{conn_id}] Response sent: type={response_data['query_type']}, "
+            f"[{conn_id}] Response sent: type={query_type}, "
             f"length={len(response_data['message'])}"
         )
 
@@ -315,12 +351,12 @@ async def _handle_upload_approval(websocket: WebSocket, message: dict, conn_id: 
         await _send_error(websocket, f"Upload execution failed: {str(e)}")
 
 
-async def _send_error(websocket: WebSocket, message: str):
+async def _send_error(websocket: WebSocket, message: str, code: str = ""):
     """Send an error message to the client."""
-    await websocket.send_json({
-        "type": "error",
-        "data": {"message": message},
-    })
+    payload: dict = {"message": message}
+    if code:
+        payload["code"] = code
+    await websocket.send_json({"type": "error", "data": payload})
 
 
 async def _send_status(websocket: WebSocket, status: str, message: str):

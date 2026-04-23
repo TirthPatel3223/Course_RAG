@@ -16,6 +16,22 @@
 
     <!-- Styles -->
     <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        .nav-right { display: flex; align-items: center; gap: 12px; }
+        .viewer-badge {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            padding: 3px 10px;
+            border-radius: 999px;
+            background: rgba(251, 191, 36, 0.15);
+            color: #fbbf24;
+            border: 1px solid rgba(251, 191, 36, 0.35);
+            text-transform: uppercase;
+            user-select: none;
+        }
+        .hidden { display: none !important; }
+    </style>
 </head>
 <body>
     <!-- ═══════════════════════════════════════ -->
@@ -47,7 +63,11 @@
                 </div>
                 <form id="login-form" class="login-form">
                     <div class="input-group">
-                        <input type="password" id="login-password" placeholder="Enter password" autocomplete="current-password" required>
+                        <input type="text" id="login-username" placeholder="Username" autocomplete="username" required>
+                        <div class="input-line"></div>
+                    </div>
+                    <div class="input-group">
+                        <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" required>
                         <div class="input-line"></div>
                     </div>
                     <button type="submit" id="login-btn" class="btn-primary">
@@ -101,13 +121,16 @@
                     <span>Admin</span>
                 </button>
             </div>
-            <button class="nav-logout" id="btn-logout" title="Sign out">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
-                    <polyline points="16 17 21 12 16 7"/>
-                    <line x1="21" y1="12" x2="9" y2="12"/>
-                </svg>
-            </button>
+            <div class="nav-right">
+                <span id="viewer-badge" class="viewer-badge hidden">Viewer mode</span>
+                <button class="nav-logout" id="btn-logout" title="Sign out">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
+                        <polyline points="16 17 21 12 16 7"/>
+                        <line x1="21" y1="12" x2="9" y2="12"/>
+                    </svg>
+                </button>
+            </div>
         </nav>
 
         <!-- ═══════════════════════════════════ -->

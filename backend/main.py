@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
 
 from backend.config import get_settings
-from backend.api.auth import verify_password, get_current_user
+from backend.api.auth import verify_credentials, get_current_user
 from backend.api.routes_chat import router as chat_router
 from backend.api.routes_admin import router as admin_router
 from backend.models.schemas import LoginRequest, LoginResponse
@@ -62,25 +62,28 @@ app.include_router(admin_router)
 
 @app.post("/api/login", response_model=LoginResponse)
 async def login(request: LoginRequest):
-    """Authenticate with password and receive a token."""
-    token = verify_password(request.password)
+    """Authenticate with username + password and receive a signed token."""
+    token = verify_credentials(request.username, request.password)
     if token:
+        from backend.api.auth import _verify_token
+        payload = _verify_token(token) or {}
         return LoginResponse(
             success=True,
             message="Authentication successful",
             token=token,
+            role=payload.get("role"),
         )
     return LoginResponse(
         success=False,
-        message="Invalid password",
+        message="Invalid credentials",
         token=None,
     )
 
 
 @app.get("/api/verify")
-async def verify_token(_: bool = Depends(get_current_user)):
-    """Verify that the current token is still valid."""
-    return {"valid": True}
+async def verify_token(payload: dict = Depends(get_current_user)):
+    """Verify that the current token is still valid. Returns the user role."""
+    return {"valid": True, "role": payload.get("role")}
 
 
 # ──────────────────────────────────────────────
@@ -106,7 +109,7 @@ async def health_check():
 @app.get("/api/chat/history/{session_id}")
 async def get_chat_history(
     session_id: str,
-    _: bool = Depends(get_current_user),
+    _: dict = Depends(get_current_user),
 ):
     """Get chat history for a session (REST endpoint)."""
     from backend.services.session_service import get_session_service

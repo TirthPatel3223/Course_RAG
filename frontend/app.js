@@ -8,6 +8,7 @@
 // ═══════════════════════════════════════
 
 let authToken = localStorage.getItem('course_rag_token');
+let userRole = localStorage.getItem('course_rag_role') || null;
 let sessionId = localStorage.getItem('course_rag_session') || crypto.randomUUID();
 let ws = null;
 let isWaitingForResponse = false;
@@ -43,7 +44,7 @@ if (window.marked) {
 
 document.addEventListener('DOMContentLoaded', () => {
     initUI();
-    
+
     if (authToken) {
         verifyToken();
     } else {
@@ -59,8 +60,9 @@ function initUI() {
     // Login form
     document.getElementById('login-form').addEventListener('submit', async (e) => {
         e.preventDefault();
+        const username = document.getElementById('login-username').value.trim();
         const pwd = document.getElementById('login-password').value;
-        await login(pwd);
+        await login(username, pwd);
     });
 
     // Navigation
@@ -174,10 +176,10 @@ function switchTab(tabId) {
 // Authentication
 // ═══════════════════════════════════════
 
-async function login(password) {
+async function login(username, password) {
     const btn = document.getElementById('login-btn');
     const err = document.getElementById('login-error');
-    
+
     btn.innerHTML = '<div class="upload-spinner" style="width:18px;height:18px;margin:0"></div>';
     btn.disabled = true;
     err.textContent = '';
@@ -186,19 +188,22 @@ async function login(password) {
         const res = await fetch('/api/login', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ password })
+            body: JSON.stringify({ username, password })
         });
-        
+
         const data = await res.json();
-        
+
         if (data.success) {
             authToken = data.token;
+            userRole = data.role || 'viewer';
             localStorage.setItem('course_rag_token', authToken);
+            localStorage.setItem('course_rag_role', userRole);
+            applyRoleRestrictions(userRole);
             connectWebSocket();
             showScreen('app');
             showToast('Login successful', 'success');
         } else {
-            err.textContent = 'Invalid password';
+            err.textContent = 'Invalid credentials';
         }
     } catch (e) {
         err.textContent = 'Server error. Please try again.';
@@ -213,26 +218,46 @@ async function verifyToken() {
         const res = await fetch('/api/verify', {
             headers: {'Authorization': `Bearer ${authToken}`}
         });
-        
+
         if (res.ok) {
+            const data = await res.json();
+            userRole = data.role || userRole || 'viewer';
+            localStorage.setItem('course_rag_role', userRole);
+            applyRoleRestrictions(userRole);
             connectWebSocket();
             showScreen('app');
         } else {
             logout();
         }
     } catch (e) {
-        // If server is unreachable, just wait
         showScreen('login');
     }
 }
 
+function applyRoleRestrictions(role) {
+    const isViewer = role === 'viewer';
+
+    // Show/hide viewer badge
+    const badge = document.getElementById('viewer-badge');
+    if (badge) badge.classList.toggle('hidden', !isViewer);
+
+    // Hide upload and admin tabs for viewers
+    const uploadTab = document.getElementById('tab-upload');
+    const adminTab = document.getElementById('tab-admin');
+    if (uploadTab) uploadTab.classList.toggle('hidden', isViewer);
+    if (adminTab) adminTab.classList.toggle('hidden', isViewer);
+}
+
 function logout() {
     authToken = null;
+    userRole = null;
     localStorage.removeItem('course_rag_token');
+    localStorage.removeItem('course_rag_role');
     if (ws) {
         ws.close();
         ws = null;
     }
+    document.getElementById('login-username').value = '';
     document.getElementById('login-password').value = '';
     showScreen('login');
 }
@@ -301,10 +326,15 @@ function handleServerMessage(message) {
     else if (type === 'error') {
         isWaitingForResponse = false;
         removeStatusIndicator();
-        showToast(data.message, 'error');
-        hideAllUploadCards();
-        // On error, still advance the queue so remaining files are processed
-        processNextQueuedItem();
+
+        if (data.code === 'VIEWER_RATE_LIMIT' || data.code === 'VIEWER_RESTRICTED') {
+            // Show inline in chat for viewer-specific blocks
+            addSystemMessage(data.message);
+        } else {
+            showToast(data.message, 'error');
+            hideAllUploadCards();
+            processNextQueuedItem();
+        }
     }
 
     // Update chat input button state
@@ -746,6 +776,20 @@ function addAssistantMessage(data) {
         ${metaHtml}
     `;
     
+    container.appendChild(div);
+    scrollToBottom();
+}
+
+function addSystemMessage(text) {
+    const container = document.getElementById('chat-messages');
+    const div = document.createElement('div');
+    div.className = 'message assistant';
+    div.innerHTML = `
+        <div class="message-bubble" style="border-left: 3px solid #fbbf24; background: rgba(251,191,36,0.07);">
+            ${text.replace(/</g, "&lt;").replace(/>/g, "&gt;")}
+        </div>
+        <div class="message-meta"><span class="role-badge">System</span></div>
+    `;
     container.appendChild(div);
     scrollToBottom();
 }
