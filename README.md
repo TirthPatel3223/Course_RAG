@@ -48,7 +48,7 @@ Deadline  Summary       General
    ChromaDB retrieval ◄────┘
    (text-embedding-3-small)
         │
-   Claude Sonnet 4 (primary)
+   Claude 3.5 Haiku (primary)
    GPT-4o-mini (fallback)
         │
    Self-verification node
@@ -65,8 +65,9 @@ Deadline  Summary       General
 | Agent | LangGraph (StateGraph with checkpointing) |
 | Vector store | ChromaDB (self-hosted, persistent) |
 | Embeddings | OpenAI `text-embedding-3-small` (1536d) |
-| LLM (primary) | Anthropic Claude Sonnet 4 |
+| LLM (primary) | Anthropic Claude 3.5 Haiku |
 | LLM (fallback) | OpenAI GPT-4o-mini |
+| OCR | Tesseract (via PyMuPDF built-in integration) |
 | File storage | Google Drive (g.ucla.edu) |
 | Session DB | SQLite (aiosqlite) |
 | Auth | Custom HMAC-SHA256 tokens (no JWT library) |
@@ -139,17 +140,18 @@ Course_RAG/
 │   │   ├── state.py             # AgentState TypedDict
 │   │   ├── prompts.py           # All LLM prompt templates
 │   │   └── nodes/               # One file per graph node
-│   │       ├── query_classifier.py
-│   │       ├── deadline_retriever.py
+│   │       ├── input_handler.py
+│   │       ├── router.py
+│   │       ├── retriever.py
+│   │       ├── deadline_extractor.py
 │   │       ├── deadline_verifier.py
-│   │       ├── summary_retriever.py
-│   │       ├── summary_generator.py
-│   │       ├── general_retriever.py
+│   │       ├── summary_redirector.py
 │   │       ├── general_responder.py
-│   │       ├── file_classifier.py
-│   │       ├── human_approval_gate.py
-│   │       ├── drive_uploader.py
-│   │       └── response_builder.py
+│   │       ├── source_explainer.py
+│   │       ├── upload_handler.py
+│   │       ├── location_classifier.py
+│   │       ├── upload_executor.py
+│   │       └── response_output.py
 │   ├── api/
 │   │   ├── auth.py              # HMAC token generation/verification, FastAPI dependencies
 │   │   ├── routes_chat.py       # WebSocket endpoint, message handlers
@@ -161,7 +163,7 @@ Course_RAG/
 │       ├── chroma_service.py    # ChromaDB CRUD
 │       ├── drive_service.py     # Google Drive OAuth + file ops
 │       ├── embedding_service.py # OpenAI embedding calls with sub-batching
-│       ├── pdf_processor.py     # PyMuPDF extraction + vision fallback
+│       ├── pdf_processor.py     # PyMuPDF extraction + Tesseract OCR fallback
 │       ├── text_processor.py    # Chunking (slides vs transcripts), metadata tagging
 │       └── session_service.py   # SQLite session + message history + viewer rate limit
 ├── frontend/
@@ -188,6 +190,7 @@ Course_RAG/
 
 - Python 3.11+
 - Docker (for deployment)
+- Tesseract OCR (`tesseract-ocr` — included automatically in Docker image)
 - Anthropic API key
 - OpenAI API key
 - Google Cloud project with Drive API enabled + OAuth credentials
@@ -225,6 +228,10 @@ GOOGLE_TOKEN_PATH=credentials/token.pickle
 DRIVE_ROOT_FOLDER=Course_RAG_Data
 
 CURRENT_QUARTER=Spring2026
+
+# Optional — OCR settings (defaults shown)
+# OCR_DPI=200
+# OCR_FALLBACK_THRESHOLD=30
 ```
 
 ### 3. Google Drive OAuth
@@ -243,7 +250,7 @@ This opens a browser for the one-time OAuth consent and saves `token.pickle`.
 python scripts/initial_embed.py
 ```
 
-Downloads all PDFs and TXTs from Drive, chunks them, and loads embeddings into ChromaDB (`data/chroma_db/`).
+Downloads all PDFs and TXTs from Drive, chunks them, and loads embeddings into ChromaDB (`data/chroma_db/`). Scanned PDFs are automatically processed via Tesseract OCR.
 
 ### 5. Run locally
 
@@ -293,6 +300,24 @@ COURSES = {
 ```
 
 Add new quarters/courses here. Drive folder structure is derived automatically from this registry.
+
+---
+
+## PDF processing
+
+The pipeline handles two types of PDFs:
+
+1. **Text-based PDFs** (slides with selectable text, syllabi) — text is extracted directly via PyMuPDF.
+2. **Scanned / image-based PDFs** (photographed textbook pages, slides exported as images) — when PyMuPDF returns fewer than 30 characters per page, Tesseract OCR runs locally to extract text from the page image.
+
+OCR runs entirely on-device (no external API calls), keeping costs at zero and avoiding rate limits. The OCR pipeline processes pages sequentially to stay within the Oracle Free Tier memory budget (6GB).
+
+Tunable via `.env`:
+
+| Setting | Default | Description |
+|---|---|---|
+| `OCR_DPI` | 200 | Render resolution for OCR (higher = more accurate but more RAM) |
+| `OCR_FALLBACK_THRESHOLD` | 30 | Characters per page below which OCR is triggered |
 
 ---
 

@@ -1,36 +1,19 @@
 """
 PDF Processor — Extract text from PDF files.
-Handles both text-based PDFs and presentation slides.
-Uses PyMuPDF (fitz) for extraction.
+Handles both text-based PDFs and scanned documents/slides.
+Uses PyMuPDF (fitz) for extraction with Tesseract OCR fallback
+for pages where text extraction yields little to no content.
 """
 
-import base64
 import logging
 from pathlib import Path
 from typing import Optional
-import io
 
 import fitz  # PyMuPDF
-from openai import AsyncOpenAI
 
 from backend.config import get_settings
 
 logger = logging.getLogger(__name__)
-
-# Minimum characters of extracted text below which we consider a page "empty"
-# and trigger the vision fallback.
-VISION_FALLBACK_THRESHOLD = 30
-
-# Render DPI for vision fallback (higher = clearer text, more tokens)
-VISION_RENDER_DPI = 150
-
-VISION_TRANSCRIBE_PROMPT = (
-    "You are transcribing a page from a UCLA course PDF (lecture slide or syllabus). "
-    "Transcribe ALL visible text exactly as it appears, preserving structure where useful "
-    "(headings, bullets, dates, deadlines, assignment names). Do not summarize. "
-    "Do not add commentary. If the page is purely decorative or blank, respond with the "
-    "single word: EMPTY"
-)
 
 
 class PDFPage:
@@ -43,12 +26,14 @@ class PDFPage:
         total_pages: int,
         has_images: bool = False,
         image_count: int = 0,
+        ocr_used: bool = False,
     ):
         self.page_number = page_number  # 1-indexed
         self.text = text
         self.total_pages = total_pages
         self.has_images = has_images
         self.image_count = image_count
+        self.ocr_used = ocr_used
 
     @property
     def is_empty(self) -> bool:
@@ -56,7 +41,8 @@ class PDFPage:
 
     def __repr__(self) -> str:
         preview = self.text[:50].replace("\n", " ") + "..." if self.text else "(empty)"
-        return f"PDFPage(page={self.page_number}/{self.total_pages}, text='{preview}')"
+        ocr_tag = " [OCR]" if self.ocr_used else ""
+        return f"PDFPage(page={self.page_number}/{self.total_pages}{ocr_tag}, text='{preview}')"
 
 
 class PDFProcessor:
@@ -64,13 +50,15 @@ class PDFProcessor:
     Extracts text content from PDF files page by page.
 
     Handles two types of PDFs:
-    - Text-based PDFs: Direct text extraction
-    - Presentation slides (converted to PDF): Text + image detection
+    - Text-based PDFs: Direct text extraction via PyMuPDF
+    - Scanned documents / slides: OCR via Tesseract (through PyMuPDF's
+      built-in OCR integration) for pages with little or no extractable text
 
     Usage:
         processor = PDFProcessor()
         pages = processor.extract_pages("path/to/file.pdf")
         pages = processor.extract_pages_from_bytes(pdf_bytes, "filename.pdf")
+        pages = await processor.extract_pages_with_ocr(pdf_bytes, "filename.pdf")
     """
 
     def extract_pages(self, file_path: str | Path) -> list[PDFPage]:
@@ -183,22 +171,33 @@ class PDFProcessor:
         return result
 
     # ──────────────────────────────────────────────
-    # Async extraction with Claude vision fallback
+    # OCR-enabled extraction (replaces vision fallback)
     # ──────────────────────────────────────────────
 
-    async def extract_pages_from_bytes_async(
+    async def extract_pages_with_ocr(
         self,
         pdf_bytes: bytes,
         filename: str = "document.pdf",
-        use_vision_fallback: bool = True,
     ) -> list[PDFPage]:
         """
         Extract text from PDF bytes; for any page where PyMuPDF returns
-        little-to-no text, optionally fall back to Claude vision to OCR
-        the page image. This handles slides exported with vectorized fonts
-        or unusual encodings that defeat normal extraction.
+        little-to-no text, fall back to Tesseract OCR (via PyMuPDF's
+        built-in OCR integration) to extract text from the page image.
+
+        This handles scanned documents and slides exported as image-based
+        PDFs without requiring any external API calls.
+
+        Pages are processed sequentially to keep memory bounded on
+        resource-constrained servers (e.g., Oracle Free Tier 6GB RAM).
         """
-        logger.info(f"Processing PDF (async, vision_fallback={use_vision_fallback}): {filename}")
+        settings = get_settings()
+        ocr_threshold = settings.ocr_fallback_threshold
+        ocr_dpi = settings.ocr_dpi
+
+        logger.info(
+            f"Processing PDF (OCR-enabled, threshold={ocr_threshold}, "
+            f"dpi={ocr_dpi}): {filename}"
+        )
 
         try:
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -208,140 +207,72 @@ class PDFProcessor:
 
         total_pages = len(doc)
         pages: list[PDFPage] = []
-        vision_used = 0
+        ocr_used_count = 0
+        ocr_failed_count = 0
 
         try:
-            client: Optional[AsyncOpenAI] = None
-            model: Optional[str] = None
-            if use_vision_fallback:
-                settings = get_settings()
-                if settings.openai_api_key:
-                    client = AsyncOpenAI(api_key=settings.openai_api_key)
-                    model = settings.openai_chat_model
-                else:
-                    logger.warning(
-                        f"{filename}: vision fallback requested but no OpenAI key set"
-                    )
-
-            # Pre-extract texts and images
-            extracted_texts = []
-            page_infos = []
             for page_idx in range(total_pages):
                 page = doc[page_idx]
+
+                # First try: standard text extraction
                 text = self._clean_text(page.get_text("text"))
                 image_list = page.get_images(full=True)
-                extracted_texts.append(text)
-                page_infos.append(image_list)
+                ocr_used = False
 
-            import asyncio
-
-            # Limit concurrency to 2 and track consecutive failures to bail early
-            sem = asyncio.Semaphore(2)
-            vision_failures = 0
-            MAX_CONSECUTIVE_FAILURES = 5
-            VISION_TIMEOUT_SECS = 25
-
-            async def process_page(page_idx):
-                nonlocal vision_failures
-                text = extracted_texts[page_idx]
-                image_list = page_infos[page_idx]
-                vision_used_here = False
-
-                needs_vision = client is not None and len(text) < VISION_FALLBACK_THRESHOLD
-                too_many_failures = vision_failures >= MAX_CONSECUTIVE_FAILURES
-
-                if needs_vision and not too_many_failures:
-                    async with sem:
-                        try:
-                            page = doc[page_idx]
-                            png_b64 = self._render_page_png_b64(page)
-                            vision_text = await asyncio.wait_for(
-                                self._vision_transcribe(client, model, png_b64),
-                                timeout=VISION_TIMEOUT_SECS,
+                # If text is below threshold, attempt OCR
+                if len(text) < ocr_threshold:
+                    try:
+                        ocr_text = self._ocr_page(page, ocr_dpi)
+                        if ocr_text and len(ocr_text.strip()) > len(text):
+                            text = ocr_text
+                            ocr_used = True
+                            ocr_used_count += 1
+                            logger.info(
+                                f"{filename} p{page_idx + 1}: OCR recovered "
+                                f"{len(text)} chars"
                             )
-                            if vision_text and vision_text.strip().upper() != "EMPTY":
-                                text = self._clean_text(vision_text)
-                                vision_used_here = True
-                                vision_failures = 0
-                                logger.info(
-                                    f"{filename} p{page_idx + 1}: vision recovered "
-                                    f"{len(text)} chars"
-                                )
-                        except Exception as e:
-                            vision_failures += 1
-                            logger.warning(
-                                f"{filename} p{page_idx + 1}: vision fallback failed "
-                                f"(failures={vision_failures}): {e}"
-                            )
-                            if vision_failures >= MAX_CONSECUTIVE_FAILURES:
-                                logger.warning(
-                                    f"{filename}: too many vision failures, "
-                                    "skipping vision for remaining pages"
-                                )
+                    except Exception as e:
+                        ocr_failed_count += 1
+                        logger.warning(
+                            f"{filename} p{page_idx + 1}: OCR failed: {e}"
+                        )
 
-                return PDFPage(
-                    page_number=page_idx + 1,
-                    text=text,
-                    total_pages=total_pages,
-                    has_images=len(image_list) > 0,
-                    image_count=len(image_list),
-                ), vision_used_here
+                pages.append(
+                    PDFPage(
+                        page_number=page_idx + 1,
+                        text=text,
+                        total_pages=total_pages,
+                        has_images=len(image_list) > 0,
+                        image_count=len(image_list),
+                        ocr_used=ocr_used,
+                    )
+                )
 
-            results = await asyncio.gather(*(process_page(i) for i in range(total_pages)))
-            
-            for page_obj, v_used in results:
-                pages.append(page_obj)
-                if v_used:
-                    vision_used += 1
-                    
         finally:
             doc.close()
 
         non_empty = sum(1 for p in pages if not p.is_empty)
         logger.info(
             f"Extracted {filename}: {total_pages} pages, {non_empty} with text "
-            f"({vision_used} recovered via vision)"
+            f"({ocr_used_count} via OCR, {ocr_failed_count} OCR failures)"
         )
         return pages
 
-    def _render_page_png_b64(self, page: fitz.Page) -> str:
-        """Render a fitz page to a base64-encoded PNG."""
-        zoom = VISION_RENDER_DPI / 72.0
-        matrix = fitz.Matrix(zoom, zoom)
-        pix = page.get_pixmap(matrix=matrix, alpha=False)
-        png_bytes = pix.tobytes("png")
-        return base64.standard_b64encode(png_bytes).decode("ascii")
+    def _ocr_page(self, page: fitz.Page, dpi: int = 200) -> str:
+        """
+        Run Tesseract OCR on a single PDF page using PyMuPDF's built-in
+        OCR integration.
 
-    async def _vision_transcribe(
-        self,
-        client: AsyncOpenAI,
-        model: str,
-        png_b64: str,
-    ) -> str:
-        """Send a single page image to OpenAI and return the transcription."""
-        response = await client.chat.completions.create(
-            model=model,
-            max_tokens=2048,
-            temperature=0.0,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": VISION_TRANSCRIBE_PROMPT,
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,{png_b64}"
-                            },
-                        },
-                    ],
-                }
-            ],
-        )
-        return response.choices[0].message.content or ""
+        Args:
+            page: A fitz.Page object.
+            dpi: Resolution to render the page at before OCR.
+
+        Returns:
+            Extracted text from OCR.
+        """
+        tp = page.get_textpage_ocr(flags=0, language="eng", dpi=dpi)
+        text = page.get_text("text", textpage=tp)
+        return self._clean_text(text)
 
     def extract_full_text(self, file_path: str | Path) -> str:
         """

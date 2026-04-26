@@ -1,7 +1,7 @@
 # Agentic Course RAG Pipeline — Implementation Plan
 
-> **Last Updated**: 2026-04-07
-> **Status**: Approved — Ready for implementation
+> **Last Updated**: 2026-04-25
+> **Status**: Implemented
 
 ## Overview
 
@@ -13,7 +13,7 @@ An agentic RAG pipeline that helps you query your UCLA course materials (slides,
 
 | Decision | Choice |
 |---|---|
-| **Primary LLM** | Claude Sonnet 4 (Anthropic API) |
+| **Primary LLM** | Claude 3.5 Haiku (Anthropic API) |
 | **Fallback LLM** | GPT-4o-mini (OpenAI API) |
 | **Embeddings** | OpenAI `text-embedding-3-small` (API) |
 | **Vector Store** | ChromaDB (self-hosted on VPS) |
@@ -26,7 +26,7 @@ An agentic RAG pipeline that helps you query your UCLA course materials (slides,
 | **Re-embedding** | Manually triggered |
 | **Upload** | Drag-and-drop + Drive link, with human-in-the-loop approval |
 | **Summary Feature** | Returns both file links AND download option |
-| **Image Handling** | Text extraction first, optional OpenAI Vision for images |
+| **Image Handling** | Text extraction first, Tesseract OCR fallback for scanned/image pages |
 
 ### Courses — Spring 2026
 
@@ -227,7 +227,7 @@ Uses Claude/OpenAI to classify the query into one of 4 types:
 
 ### 10. Execute Upload
 - Uploads file to the approved Google Drive location
-- Extracts text from the file (PyMuPDF for PDF, direct read for .txt)
+- Extracts text from the file (PyMuPDF for PDF, with Tesseract OCR fallback for scanned pages; direct read for .txt)
 - Chunks the text using the chunking strategy (below)
 - Embeds chunks using OpenAI `text-embedding-3-small`
 - Stores embeddings + metadata in ChromaDB
@@ -388,9 +388,9 @@ class AgentState(MessagesState):
 async def call_llm(messages, model_preference="claude"):
     """Try Claude first, fall back to OpenAI."""
     try:
-        # Try Claude (Sonnet 4) first
+        # Try Claude (3.5 Haiku) first
         response = await anthropic_client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-3-5-haiku-20241022",
             messages=messages,
             max_tokens=4096
         )
@@ -458,7 +458,7 @@ Course_RAG/
 │   │   ├── embedding_service.py     # OpenAI embedding wrapper
 │   │   ├── chroma_service.py        # ChromaDB operations
 │   │   ├── drive_service.py         # Google Drive API wrapper
-│   │   ├── pdf_processor.py         # PDF text extraction (PyMuPDF)
+│   │   ├── pdf_processor.py         # PDF text extraction (PyMuPDF + Tesseract OCR)
 │   │   ├── text_processor.py        # Text chunking logic
 │   │   └── session_service.py       # SQLite session management
 │   │
@@ -511,7 +511,7 @@ Course_RAG/
 
 | Component | Technology | Cost |
 |---|---|---|
-| **LLM (Primary)** | Claude Sonnet 4 (Anthropic API) | ~$1-3/mo |
+| **LLM (Primary)** | Claude 3.5 Haiku (Anthropic API) | ~$1-3/mo |
 | **LLM (Fallback)** | GPT-4o-mini (OpenAI API) | ~$0-1/mo |
 | **Embeddings** | OpenAI `text-embedding-3-small` | ~$0.02/mo |
 | **Vector Store** | ChromaDB (self-hosted on VPS) | $0 |
@@ -519,6 +519,7 @@ Course_RAG/
 | **Backend Framework** | FastAPI + Uvicorn | $0 |
 | **Agent Orchestration** | LangGraph | $0 |
 | **PDF Processing** | PyMuPDF (fitz) | $0 |
+| **OCR** | Tesseract (via PyMuPDF built-in integration) | $0 |
 | **Session Storage** | SQLite | $0 |
 | **Frontend** | Vanilla HTML/CSS/JS | $0 |
 | **Deployment** | Oracle Cloud Free Tier (ARM) | $0 |

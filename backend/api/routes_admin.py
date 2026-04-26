@@ -249,10 +249,10 @@ async def _run_reembed(
                     drive_link=drive_link,
                 )
 
-                # Extract and chunk
+                # Extract and chunk (with OCR fallback for scanned PDFs)
                 if filename.lower().endswith(".pdf"):
-                    pages = await pdf_proc.extract_pages_from_bytes_async(
-                        content, filename, use_vision_fallback=True
+                    pages = await pdf_proc.extract_pages_with_ocr(
+                        content, filename
                     )
                     chunks = text_proc.chunk_slides(pages, metadata)
                 elif filename.lower().endswith(".txt"):

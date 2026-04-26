@@ -77,9 +77,9 @@ async def upload_executor(state: AgentState) -> dict:
         drive_file_id = drive_result.get("id", "")
         drive_link = drive_result.get("webViewLink", "")
 
-        # Step 2: Extract text
+        # Step 2: Extract text (with OCR fallback for scanned PDFs)
         if upload_filename.lower().endswith(".pdf"):
-            pages = pdf_proc.extract_pages_from_bytes(content_bytes, upload_filename)
+            pages = await pdf_proc.extract_pages_with_ocr(content_bytes, upload_filename)
             file_metadata = text_proc.build_file_metadata(
                 file_name=upload_filename,
                 file_type=proposal.get("file_type", "slides"),

@@ -125,6 +125,16 @@ class Settings(BaseSettings):
         description="Embedding vector dimensions",
     )
 
+    # --- OCR Settings ---
+    ocr_dpi: int = Field(
+        default=200,
+        description="DPI for rendering PDF pages to images for OCR",
+    )
+    ocr_fallback_threshold: int = Field(
+        default=30,
+        description="Minimum characters of extracted text below which OCR is triggered",
+    )
+
     # --- Chunking Settings ---
     slide_overlap_lines: int = Field(
         default=2,

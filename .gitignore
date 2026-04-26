@@ -36,3 +36,7 @@ tmp/
 
 # Local-only docs
 docs/problems_solutions.md
+
+# Claude / Backups
+.claude/
+*.tar.gz

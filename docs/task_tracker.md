@@ -28,10 +28,19 @@
   - `GET /api/admin/drive/files` — file listing
 - [x] All 33 tests still passing
 
-## Phase 5: Frontend ← NEXT
-- [ ] Login page
-- [ ] Chat interface with markdown rendering
-- [ ] File upload (drag-and-drop + Drive link)
-- [ ] Admin panel (stats, re-embed, Drive tree)
+## Phase 5: Frontend ✅
+- [x] Login page
+- [x] Chat interface with markdown rendering
+- [x] File upload (drag-and-drop + Drive link)
+- [x] Admin panel (stats, re-embed, Drive tree)
 
-## Phase 6-8: Data load, Docker, Oracle Cloud
+## Phase 6-8: Data load, Docker, Oracle Cloud ✅
+- [x] Docker container built and deployed
+- [x] Oracle Cloud Free Tier VM provisioned
+- [x] Caddy reverse proxy with automatic HTTPS
+- [x] DuckDNS domain: `tirth-courserag.duckdns.org`
+
+## Post-launch Improvements
+- [x] Source explanation query type (follow-up about document sources)
+- [x] Multi-file upload queue with sequential processing
+- [x] Replaced vision API fallback with local Tesseract OCR for scanned PDFs

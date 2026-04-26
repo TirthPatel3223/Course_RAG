@@ -37,7 +37,7 @@ class TestConfig:
             session_db_path=os.path.join(tempfile.mkdtemp(), "test.db"),
         )
         assert settings.current_quarter == "Spring2026"
-        assert settings.claude_model == "claude-sonnet-4-20250514"
+        assert settings.claude_model == "claude-3-5-haiku-20241022"
         assert settings.openai_embedding_model == "text-embedding-3-small"
 
     def test_course_registry(self):
