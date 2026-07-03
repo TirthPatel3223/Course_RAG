@@ -23,7 +23,10 @@ tirth-courserag.duckdns.org {
     # Security headers
     header {
         X-Content-Type-Options nosniff
-        X-Frame-Options DENY
+        # Allow this app to be embedded in an iframe only from your own sites.
+        # (X-Frame-Options DENY blocked all framing; frame-ancestors is the
+        #  modern, per-origin replacement.)
+        Content-Security-Policy "frame-ancestors 'self' https://tirthpatel.org https://www.tirthpatel.org"
         Referrer-Policy strict-origin-when-cross-origin
     }
 
